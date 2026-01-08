@@ -10,6 +10,8 @@ import (
 
 	"github.com/color-game/api/api"
 	"github.com/color-game/api/datastore"
+	"github.com/color-game/api/migrations"
+	"github.com/color-game/api/scheduler"
 	"github.com/joho/godotenv"
 )
 
@@ -47,17 +49,48 @@ func main() {
 	}
 	defer dbConn.Close()
 
+	// Run database migrations
+	fmt.Println("Running database migrations...")
+	if err := migrations.RunMigrations(dbConn); err != nil {
+		log.Fatalf("Failed to run migrations: %v", err)
+	}
+
 	// Create user repository
 	userRepo, userRepoErr := datastore.NewUserDatabase(dbConn)
 	if userRepoErr != nil {
 		log.Fatalf("Failed to create user repository: %v", userRepoErr)
 	}
 
+	// Create daily color repository
+	dailyColorRepo, dailyColorRepoErr := datastore.NewDailyColorDatabase(dbConn)
+	if dailyColorRepoErr != nil {
+		log.Fatalf("Failed to create daily color repository: %v", dailyColorRepoErr)
+	}
+
+	// Create daily score repository
+	dailyScoreRepo, dailyScoreRepoErr := datastore.NewDailyScoreDatabase(dbConn)
+	if dailyScoreRepoErr != nil {
+		log.Fatalf("Failed to create daily score repository: %v", dailyScoreRepoErr)
+	}
+
+	// Create daily leaderboard repository
+	dailyLeaderboardRepo, dailyLeaderboardRepoErr := datastore.NewDailyLeaderboardDatabase(dbConn)
+	if dailyLeaderboardRepoErr != nil {
+		log.Fatalf("Failed to create daily leaderboard repository: %v", dailyLeaderboardRepoErr)
+	}
+
 	// Create application
 	app := &api.Application{
-		Config:   config,
-		UserRepo: userRepo,
+		Config:               config,
+		UserRepo:             userRepo,
+		DailyColorRepo:       dailyColorRepo,
+		DailyScoreRepo:       dailyScoreRepo,
+		DailyLeaderboardRepo: dailyLeaderboardRepo,
 	}
+
+	// Start scheduler for daily color generation
+	colorScheduler := scheduler.NewScheduler(dailyColorRepo)
+	colorScheduler.Start()
 
 	// Create and start server
 	mux := http.NewServeMux()

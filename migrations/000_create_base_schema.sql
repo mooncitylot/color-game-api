@@ -1,4 +1,5 @@
--- Color Game Database Schema
+-- Migration: Create base schema (users and user_devices tables)
+-- This ensures the base tables exist in the database
 
 -- Create users table
 CREATE TABLE IF NOT EXISTS users (
@@ -25,20 +26,8 @@ CREATE TABLE IF NOT EXISTS user_devices (
     UNIQUE(fingerprint, user_id)
 );
 
--- Create daily_color table for storing one color per day
-CREATE TABLE IF NOT EXISTS daily_color (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL UNIQUE,
-    color_name VARCHAR(255) NOT NULL,
-    r INTEGER NOT NULL CHECK (r >= 0 AND r <= 255),
-    g INTEGER NOT NULL CHECK (g >= 0 AND g <= 255),
-    b INTEGER NOT NULL CHECK (b >= 0 AND b <= 255),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
 -- Create indexes
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_username ON users(username);
-CREATE INDEX idx_user_devices_user_id ON user_devices(user_id);
-CREATE INDEX idx_user_devices_fingerprint ON user_devices(fingerprint);
-CREATE INDEX idx_daily_color_date ON daily_color(date);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+CREATE INDEX IF NOT EXISTS idx_user_devices_user_id ON user_devices(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_devices_fingerprint ON user_devices(fingerprint);

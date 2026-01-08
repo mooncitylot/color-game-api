@@ -20,6 +20,9 @@ type Config struct {
 }
 
 type Application struct {
-	Config   Config
-	UserRepo datastore.UserRepository
+	Config               Config
+	UserRepo             datastore.UserRepository
+	DailyColorRepo       datastore.DailyColorRepository
+	DailyScoreRepo       datastore.DailyScoreRepository
+	DailyLeaderboardRepo datastore.DailyLeaderboardRepository
 }

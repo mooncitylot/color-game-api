@@ -69,13 +69,20 @@ func (app Application) BuildRoutes(mux *http.ServeMux) *http.ServeMux {
 	mux.HandleFunc("/", app.home)
 	mux.HandleFunc("/v1/auth/signup", app.signup)
 	mux.HandleFunc("/v1/auth/login", app.login)
+	mux.HandleFunc("/v1/colors/random", app.getRandomColor)
+	mux.HandleFunc("/v1/colors/daily", app.getDailyColor)
+	mux.HandleFunc("/v1/colors/daily/all", app.getAllDailyColors)
+	mux.HandleFunc("/v1/leaderboard", app.getLeaderboard)
 
 	// Authenticated endpoints
 	mux.HandleFunc("/v1/users/me", app.authenticate(app.getCurrentUser))
 	mux.HandleFunc("/v1/users/me/update", app.authenticate(app.updateCurrentUser))
+	mux.HandleFunc("/v1/scores/submit", app.authenticate(app.submitScore))
+	mux.HandleFunc("/v1/scores/history", app.authenticate(app.getUserScoreHistory))
 
 	// Admin endpoints
 	mux.HandleFunc("/v1/users", app.verifyPermissions(app.getAllUsers))
+	mux.HandleFunc("/v1/admin/colors/generate", app.verifyPermissions(app.generateDailyColor))
 
 	// Wrap entire mux with CORS and origins check
 	finalMux.Handle("/", wrapMuxWithCorsAndOrigins(mux, app))
