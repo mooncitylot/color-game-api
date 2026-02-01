@@ -45,6 +45,13 @@ type User struct {
 	UpdatedAt      time.Time `json:"updatedAt" db:"updated_at"`
 }
 
+type UserSummary struct {
+	UserID   string `json:"userId" db:"user_id"`
+	Username string `json:"username" db:"username"`
+	Points   int    `json:"points" db:"points"`
+	Level    int    `json:"level" db:"level"`
+}
+
 type UserDevice struct {
 	ID          string    `json:"id" db:"id"`
 	UserID      string    `json:"userId" db:"user_id"`

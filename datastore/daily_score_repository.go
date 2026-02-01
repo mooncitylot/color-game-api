@@ -15,6 +15,9 @@ type DailyScoreRepository interface {
 	GetUserAttemptCount(userID string, date time.Time) (int, error)
 	GetAllScoresByDate(date time.Time) ([]models.DailyScore, error)
 	GetUserScoreHistory(userID string) ([]models.DailyScore, error)
+	DeleteUserScoresByDate(userID string, date time.Time) (int64, error)
+	SetDailyAttemptModifier(userID string, date time.Time, extraAttempts int) (models.DailyAttemptModifier, error)
+	GetDailyAttemptModifier(userID string, date time.Time) (models.DailyAttemptModifier, error)
 }
 
 type DailyScoreDatabase struct {
@@ -25,6 +28,89 @@ func NewDailyScoreDatabase(db *sql.DB) (DailyScoreDatabase, error) {
 	var dailyScoreDB DailyScoreDatabase
 	dailyScoreDB.database = db
 	return dailyScoreDB, nil
+}
+
+// SetDailyAttemptModifier upserts extra attempt allowances for a user on a date
+func (dsdb DailyScoreDatabase) SetDailyAttemptModifier(userID string, date time.Time, extraAttempts int) (models.DailyAttemptModifier, error) {
+	db := dsdb.database
+
+	normalizedDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+
+	query := `
+		INSERT INTO daily_attempt_modifiers (user_id, date, extra_attempts, created_at, updated_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		ON CONFLICT (user_id, date)
+		DO UPDATE SET extra_attempts = daily_attempt_modifiers.extra_attempts + EXCLUDED.extra_attempts,
+			updated_at = NOW()
+		RETURNING modifier_id, user_id, date, extra_attempts, created_at, updated_at`
+
+	var modifier models.DailyAttemptModifier
+	if err := db.QueryRow(query, userID, normalizedDate, extraAttempts).Scan(
+		&modifier.ModifierID,
+		&modifier.UserID,
+		&modifier.Date,
+		&modifier.ExtraAttempts,
+		&modifier.CreatedAt,
+		&modifier.UpdatedAt,
+	); err != nil {
+		return models.DailyAttemptModifier{}, fmt.Errorf("failed to set attempt modifier: %v", err)
+	}
+
+	return modifier, nil
+}
+
+// GetDailyAttemptModifier fetches attempt bonuses for a user on a date
+func (dsdb DailyScoreDatabase) GetDailyAttemptModifier(userID string, date time.Time) (models.DailyAttemptModifier, error) {
+	db := dsdb.database
+
+	normalizedDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+
+	query := `
+		SELECT modifier_id, user_id, date, extra_attempts, created_at, updated_at
+		FROM daily_attempt_modifiers
+		WHERE user_id = $1 AND date = $2`
+
+	var modifier models.DailyAttemptModifier
+	err := db.QueryRow(query, userID, normalizedDate).Scan(
+		&modifier.ModifierID,
+		&modifier.UserID,
+		&modifier.Date,
+		&modifier.ExtraAttempts,
+		&modifier.CreatedAt,
+		&modifier.UpdatedAt,
+	)
+
+	switch err {
+	case sql.ErrNoRows:
+		return models.DailyAttemptModifier{}, NoRowsError{true, err}
+	case nil:
+		return modifier, nil
+	default:
+		return models.DailyAttemptModifier{}, err
+	}
+}
+
+// DeleteUserScoresByDate removes all attempts for a user on a specific date
+func (dsdb DailyScoreDatabase) DeleteUserScoresByDate(userID string, date time.Time) (int64, error) {
+	db := dsdb.database
+
+	// Normalize date to start of day
+	normalizedDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+
+	result, err := db.Exec(`
+		DELETE FROM daily_scores
+		WHERE user_id = $1 AND date = $2
+	`, userID, normalizedDate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete daily scores: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
 }
 
 // Create inserts a new daily score

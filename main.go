@@ -61,6 +61,12 @@ func main() {
 		log.Fatalf("Failed to create user repository: %v", userRepoErr)
 	}
 
+	// Create friend repository
+	friendRepo, friendRepoErr := datastore.NewFriendDatabase(dbConn)
+	if friendRepoErr != nil {
+		log.Fatalf("Failed to create friend repository: %v", friendRepoErr)
+	}
+
 	// Create daily color repository
 	dailyColorRepo, dailyColorRepoErr := datastore.NewDailyColorDatabase(dbConn)
 	if dailyColorRepoErr != nil {
@@ -79,6 +85,12 @@ func main() {
 		log.Fatalf("Failed to create daily leaderboard repository: %v", dailyLeaderboardRepoErr)
 	}
 
+	// Create shop repository
+	shopRepo, shopRepoErr := datastore.NewShopDatabase(dbConn)
+	if shopRepoErr != nil {
+		log.Fatalf("Failed to create shop repository: %v", shopRepoErr)
+	}
+
 	// Create application
 	app := &api.Application{
 		Config:               config,
@@ -86,6 +98,8 @@ func main() {
 		DailyColorRepo:       dailyColorRepo,
 		DailyScoreRepo:       dailyScoreRepo,
 		DailyLeaderboardRepo: dailyLeaderboardRepo,
+		ShopRepo:             shopRepo,
+		FriendRepo:           friendRepo,
 	}
 
 	// Start scheduler for daily color generation

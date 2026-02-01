@@ -18,6 +18,16 @@ type DailyScore struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// DailyAttemptModifier tracks additional attempts granted for a day
+type DailyAttemptModifier struct {
+	ModifierID    int       `json:"modifier_id"`
+	UserID        string    `json:"user_id"`
+	Date          time.Time `json:"date"`
+	ExtraAttempts int       `json:"extra_attempts"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 // DailyLeaderboard represents a user's best score for a specific day
 type DailyLeaderboard struct {
 	ID           int       `json:"id"`
@@ -41,6 +51,7 @@ type ScoreSubmissionResponse struct {
 	Score          int    `json:"score"`
 	AttemptNumber  int    `json:"attempt_number"`
 	AttemptsLeft   int    `json:"attempts_left"`
+	MaxAttempts    int    `json:"max_attempts,omitempty"`
 	BestScore      int    `json:"best_score"`
 	IsNewBest      bool   `json:"is_new_best"`
 	SubmittedColor string `json:"submitted_color"`
@@ -59,9 +70,11 @@ type LeaderboardEntry struct {
 
 // UserScoreHistory represents a user's score history for a specific day
 type UserScoreHistory struct {
-	Date         string       `json:"date"`
-	Attempts     []DailyScore `json:"attempts"`
-	BestScore    int          `json:"best_score"`
-	AttemptsUsed int          `json:"attempts_used"`
-	AttemptsLeft int          `json:"attempts_left"`
+	Date          string       `json:"date"`
+	Attempts      []DailyScore `json:"attempts"`
+	BestScore     int          `json:"best_score"`
+	AttemptsUsed  int          `json:"attempts_used"`
+	AttemptsLeft  int          `json:"attempts_left"`
+	ExtraAttempts int          `json:"extra_attempts"`
+	MaxAttempts   int          `json:"max_attempts"`
 }

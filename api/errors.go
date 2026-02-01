@@ -107,3 +107,14 @@ func (app *Application) userAlreadyExists(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusConflict)
 	json.NewEncoder(w).Encode(userExists)
 }
+
+func (app *Application) badRequest(w http.ResponseWriter, r *http.Request, err error) {
+	badRequest := HandlerError{
+		ErrorName:        "Bad Request",
+		Description:      err.Error(),
+		PossibleSolution: "Check your request parameters",
+		CallerInfo:       getCallerInfo(),
+	}
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(badRequest)
+}

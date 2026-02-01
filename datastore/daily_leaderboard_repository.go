@@ -14,6 +14,7 @@ type DailyLeaderboardRepository interface {
 	GetByUserAndDate(userID string, date time.Time) (models.DailyLeaderboard, error)
 	GetLeaderboardByDate(date time.Time, limit int) ([]models.LeaderboardEntry, error)
 	GetUserRankByDate(userID string, date time.Time) (int, error)
+	DeleteByUserAndDate(userID string, date time.Time) (int64, error)
 }
 
 type DailyLeaderboardDatabase struct {
@@ -24,6 +25,29 @@ func NewDailyLeaderboardDatabase(db *sql.DB) (DailyLeaderboardDatabase, error) {
 	var dailyLeaderboardDB DailyLeaderboardDatabase
 	dailyLeaderboardDB.database = db
 	return dailyLeaderboardDB, nil
+}
+
+// DeleteByUserAndDate removes a leaderboard entry for a user on a specific date
+func (dldb DailyLeaderboardDatabase) DeleteByUserAndDate(userID string, date time.Time) (int64, error) {
+	db := dldb.database
+
+	// Normalize date to start of day
+	normalizedDate := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+
+	result, err := db.Exec(`
+		DELETE FROM daily_leaderboard
+		WHERE user_id = $1 AND date = $2
+	`, userID, normalizedDate)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete leaderboard entry: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
 }
 
 // CreateOrUpdate inserts or updates a leaderboard entry

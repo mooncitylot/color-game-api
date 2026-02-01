@@ -25,4 +25,6 @@ type Application struct {
 	DailyColorRepo       datastore.DailyColorRepository
 	DailyScoreRepo       datastore.DailyScoreRepository
 	DailyLeaderboardRepo datastore.DailyLeaderboardRepository
+	ShopRepo             datastore.ShopRepository
+	FriendRepo           datastore.FriendRepository
 }

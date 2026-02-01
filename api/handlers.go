@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"math/rand"
 	"net/http"
 	"time"
 
+	"github.com/color-game/api/datastore"
 	"github.com/color-game/api/models"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -37,6 +39,20 @@ func (app *Application) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate username doesn't contain spaces
+	if len(userSignup.Username) == 0 {
+		app.badRequest(w, r, errors.New("username is required"))
+		return
+	}
+
+	// Check for spaces in username
+	for _, char := range userSignup.Username {
+		if char == ' ' {
+			app.badRequest(w, r, errors.New("username cannot contain spaces"))
+			return
+		}
+	}
+
 	// Create new user
 	newUser, newUserErr := models.NewUser(*userSignup)
 	if newUserErr != nil {
@@ -44,10 +60,17 @@ func (app *Application) signup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if user already exists
+	// Check if email already exists
 	_, getErr := app.UserRepo.GetUserByEmail(newUser.Email)
 	if getErr == nil {
 		app.userAlreadyExists(w, r, getErr)
+		return
+	}
+
+	// Check if username already exists
+	_, getUsernameErr := app.UserRepo.GetUserByUsername(newUser.Username)
+	if getUsernameErr == nil {
+		app.badRequest(w, r, errors.New("username already taken"))
 		return
 	}
 
@@ -412,9 +435,22 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Maximum 5 attempts per day
-	if attemptCount >= 5 {
-		http.Error(w, "Maximum attempts (5) reached for today", http.StatusBadRequest)
+	extraAttempts := 0
+	modifier, err := app.DailyScoreRepo.GetDailyAttemptModifier(user.UserID, normalizedToday)
+	if err == nil {
+		extraAttempts = modifier.ExtraAttempts
+	} else if _, ok := err.(datastore.NoRowsError); !ok {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	maxAttempts := 5 + extraAttempts
+	if maxAttempts > 10 {
+		maxAttempts = 10
+	}
+
+	if attemptCount >= maxAttempts {
+		http.Error(w, fmt.Sprintf("Maximum attempts (%d) reached for today", maxAttempts), http.StatusBadRequest)
 		return
 	}
 
@@ -448,19 +484,30 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 
 	// Get user's best score for today
 	existingLeaderboard, err := app.DailyLeaderboardRepo.GetByUserAndDate(user.UserID, normalizedToday)
+	hasExistingLeaderboard := true
+	if err != nil {
+		if _, ok := err.(datastore.NoRowsError); ok {
+			hasExistingLeaderboard = false
+		} else {
+			app.internalServerError(w, r, err)
+			return
+		}
+	}
+
 	isNewBest := false
 	bestScore := score
+	bestAttemptsUsed := savedScore.AttemptNumber
 
-	if err != nil {
-		// No existing entry, this is the first attempt and best score
+	if !hasExistingLeaderboard {
 		isNewBest = true
 	} else {
-		// Check if this is a new best
+		bestScore = existingLeaderboard.BestScore
+		bestAttemptsUsed = existingLeaderboard.AttemptsUsed
+
 		if score > existingLeaderboard.BestScore {
 			isNewBest = true
 			bestScore = score
-		} else {
-			bestScore = existingLeaderboard.BestScore
+			bestAttemptsUsed = savedScore.AttemptNumber
 		}
 	}
 
@@ -469,8 +516,8 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 		leaderboardEntry := models.DailyLeaderboard{
 			UserID:       user.UserID,
 			Date:         normalizedToday,
-			BestScore:    score,
-			AttemptsUsed: savedScore.AttemptNumber,
+			BestScore:    bestScore,
+			AttemptsUsed: bestAttemptsUsed,
 			CreatedAt:    time.Now(),
 			UpdatedAt:    time.Now(),
 		}
@@ -482,8 +529,12 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := app.FriendRepo.RecordFriendActivity(user.UserID, normalizedToday, bestScore, bestAttemptsUsed); err != nil {
+		log.Printf("failed to record friend activity for user %s: %v", user.UserID, err)
+	}
+
 	// Build response
-	attemptsLeft := 5 - savedScore.AttemptNumber
+	attemptsLeft := maxAttempts - savedScore.AttemptNumber
 	message := ""
 
 	if score == 100 {
@@ -500,12 +551,37 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 
 	if attemptsLeft == 0 {
 		message += " No more attempts left for today."
+
+		pointsAward := bestScore
+		newTotalPoints := user.Points + pointsAward
+		prevMilestones := user.Points / 1000
+		newMilestones := newTotalPoints / 1000
+		levelUps := newMilestones - prevMilestones
+		if levelUps < 0 {
+			levelUps = 0
+		}
+
+		if levelUps > 0 {
+			user.Level += levelUps
+		}
+
+		user.Points = newTotalPoints
+
+		creditAward := int(math.Ceil(float64(bestScore) / 2.0))
+		user.Credits += creditAward
+		user.UpdatedAt = time.Now()
+
+		if _, err := app.UserRepo.Update(user); err != nil {
+			app.internalServerError(w, r, fmt.Errorf("failed to finalize daily rewards: %v", err))
+			return
+		}
 	}
 
 	response := models.ScoreSubmissionResponse{
 		Score:          score,
 		AttemptNumber:  savedScore.AttemptNumber,
 		AttemptsLeft:   attemptsLeft,
+		MaxAttempts:    maxAttempts,
 		BestScore:      bestScore,
 		IsNewBest:      isNewBest,
 		SubmittedColor: fmt.Sprintf("rgb(%d,%d,%d)", submission.SubmittedColorR, submission.SubmittedColorG, submission.SubmittedColorB),
@@ -575,12 +651,109 @@ func (app *Application) getUserScoreHistory(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	extraAttempts := 0
+	modifier, err := app.DailyScoreRepo.GetDailyAttemptModifier(user.UserID, normalizedToday)
+	if err == nil {
+		extraAttempts = modifier.ExtraAttempts
+	} else if _, ok := err.(datastore.NoRowsError); !ok {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	maxAttempts := 5 + extraAttempts
+	if maxAttempts > 10 {
+		maxAttempts = 10
+	}
+
+	attemptsLeft := maxAttempts - attemptsUsed
+	if attemptsLeft < 0 {
+		attemptsLeft = 0
+	}
+
 	response := models.UserScoreHistory{
-		Date:         normalizedToday.Format("2006-01-02"),
-		Attempts:     attempts,
-		BestScore:    bestScore,
-		AttemptsUsed: attemptsUsed,
-		AttemptsLeft: 5 - attemptsUsed,
+		Date:          normalizedToday.Format("2006-01-02"),
+		Attempts:      attempts,
+		BestScore:     bestScore,
+		AttemptsUsed:  attemptsUsed,
+		AttemptsLeft:  attemptsLeft,
+		ExtraAttempts: extraAttempts,
+		MaxAttempts:   maxAttempts,
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(response)
+}
+
+type resetAttemptsRequest struct {
+	UserID string `json:"user_id"`
+	Date   string `json:"date"`
+}
+
+type resetAttemptsResponse struct {
+	UserID              string `json:"user_id"`
+	Date                string `json:"date"`
+	ScoresDeleted       int64  `json:"scores_deleted"`
+	LeaderboardCleared  bool   `json:"leaderboard_cleared"`
+	FriendActivityReset bool   `json:"friend_activity_reset"`
+}
+
+// POST /v1/admin/scores/reset - Reset a user's daily attempts (Admin only)
+func (app *Application) resetUserDailyAttempts(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		app.requirePostMethod(w, r, ErrPOST)
+		return
+	}
+
+	var req resetAttemptsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		app.badJSONRequest(w, r, err)
+		return
+	}
+
+	if req.UserID == "" {
+		app.badRequest(w, r, errors.New("user_id is required"))
+		return
+	}
+
+	var targetDate time.Time
+	if req.Date == "" {
+		targetDate = time.Now()
+	} else {
+		parsed, err := time.Parse("2006-01-02", req.Date)
+		if err != nil {
+			app.badRequest(w, r, errors.New("date must be in YYYY-MM-DD format"))
+			return
+		}
+		targetDate = parsed
+	}
+
+	normalizedDate := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, targetDate.Location())
+
+	scoresDeleted, err := app.DailyScoreRepo.DeleteUserScoresByDate(req.UserID, normalizedDate)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	leaderboardRows, err := app.DailyLeaderboardRepo.DeleteByUserAndDate(req.UserID, normalizedDate)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	friendActivityReset := false
+	if err := app.FriendRepo.RecordFriendActivity(req.UserID, normalizedDate, 0, 0); err == nil {
+		friendActivityReset = true
+	} else {
+		log.Printf("failed to reset friend activity for user %s: %v", req.UserID, err)
+	}
+
+	response := resetAttemptsResponse{
+		UserID:              req.UserID,
+		Date:                normalizedDate.Format("2006-01-02"),
+		ScoresDeleted:       scoresDeleted,
+		LeaderboardCleared:  leaderboardRows > 0,
+		FriendActivityReset: friendActivityReset,
 	}
 
 	w.WriteHeader(http.StatusOK)
