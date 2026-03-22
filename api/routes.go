@@ -69,6 +69,7 @@ func (app Application) BuildRoutes(mux *http.ServeMux) *http.ServeMux {
 	mux.HandleFunc("/", app.home)
 	mux.HandleFunc("/v1/auth/signup", app.signup)
 	mux.HandleFunc("/v1/auth/login", app.login)
+	mux.HandleFunc("/v1/auth/refresh", app.refresh)
 	mux.HandleFunc("/v1/colors/random", app.getRandomColor)
 	mux.HandleFunc("/v1/colors/daily", app.getDailyColor)
 	mux.HandleFunc("/v1/colors/daily/all", app.getAllDailyColors)

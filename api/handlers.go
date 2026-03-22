@@ -15,6 +15,11 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+type authTokenResponse struct {
+	AccessToken string `json:"accessToken"`
+	ExpiresAt   string `json:"expiresAt"`
+}
+
 // GET /
 func (app *Application) home(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -206,7 +211,117 @@ func (app *Application) login(w http.ResponseWriter, r *http.Request) {
 		Expires:  refreshExpiry,
 	})
 
-	w.WriteHeader(http.StatusOK)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(authTokenResponse{
+		AccessToken: accessTokenString,
+		ExpiresAt:   accessExpiry.UTC().Format(time.RFC3339),
+	})
+}
+
+func (app *Application) userFromRefreshTokenString(tokenString string) (*models.JWTClaims, models.User, error) {
+	if tokenString == "" {
+		return nil, models.User{}, errors.New("empty refresh token")
+	}
+
+	token, err := jwt.ParseWithClaims(tokenString, &models.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(app.Config.JwtSecret), nil
+	})
+
+	if err != nil || !token.Valid {
+		return nil, models.User{}, errors.New("invalid refresh token")
+	}
+
+	claims, ok := token.Claims.(*models.JWTClaims)
+	if !ok || claims.Scope != "refresh" {
+		return nil, models.User{}, errors.New("invalid refresh token claims")
+	}
+
+	device, err := app.UserRepo.GetDeviceByFingerprint(claims.UserID, claims.DeviceFingerprint)
+	if err != nil {
+		return nil, models.User{}, errors.New("device not found")
+	}
+
+	if time.Now().After(device.Expiry) {
+		return nil, models.User{}, errors.New("device expired")
+	}
+
+	user, err := app.UserRepo.Get(claims.UserID)
+	if err != nil {
+		return nil, models.User{}, err
+	}
+
+	return claims, user, nil
+}
+
+// POST /v1/auth/refresh
+func (app *Application) refresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		app.requirePostMethod(w, r, ErrPOST)
+		return
+	}
+
+	cookie, err := r.Cookie(models.JWT.REFRESH_COOKIE_NAME)
+	if err != nil {
+		app.invalidCredentials(w, r, errors.New("no refresh token"))
+		return
+	}
+
+	claims, user, err := app.userFromRefreshTokenString(cookie.Value)
+	if err != nil {
+		app.invalidCredentials(w, r, err)
+		return
+	}
+
+	if !user.Approved {
+		app.invalidCredentials(w, r, errors.New("user not yet approved"))
+		return
+	}
+
+	accessExpiry := time.Now().Add(time.Second * time.Duration(app.Config.JwtAccessDuration))
+	accessClaims := models.JWTClaims{
+		UserID:            user.UserID,
+		Email:             user.Email,
+		Kind:              user.Kind,
+		DeviceFingerprint: claims.DeviceFingerprint,
+		Scope:             "authentication",
+		TokenType:         models.JWT.ACCESS_COOKIE_NAME,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(accessExpiry),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	accessToken := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessTokenString, err := accessToken.SignedString([]byte(app.Config.JwtSecret))
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	sameSite := http.SameSiteStrictMode
+	if app.Config.JwtDomain == "" {
+		sameSite = http.SameSiteNoneMode
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     models.JWT.ACCESS_COOKIE_NAME,
+		Value:    accessTokenString,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: sameSite,
+		Path:     "/",
+		Domain:   app.Config.JwtDomain,
+		Expires:  accessExpiry,
+	})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(authTokenResponse{
+		AccessToken: accessTokenString,
+		ExpiresAt:   accessExpiry.UTC().Format(time.RFC3339),
+	})
 }
 
 // GET /v1/users/me - Get current authenticated user

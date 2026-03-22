@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/color-game/api/models"
@@ -26,16 +27,25 @@ func handleCors(h http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// getUserFromJWT attempts to get user from JWT access token cookie
-func (app *Application) getUserFromJWT(r *http.Request) (models.User, error) {
-	// Get JWT access token from cookie
-	cookie, err := r.Cookie(models.JWT.ACCESS_COOKIE_NAME)
-	if err != nil {
-		return models.User{}, errors.New("no JWT cookie found")
+func bearerTokenFromRequest(r *http.Request) string {
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return ""
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+// userFromAccessTokenString validates an access (authentication scope) JWT and returns the user.
+func (app *Application) userFromAccessTokenString(tokenString string) (models.User, error) {
+	if tokenString == "" {
+		return models.User{}, errors.New("empty JWT token")
 	}
 
-	// Parse and validate JWT token
-	token, err := jwt.ParseWithClaims(cookie.Value, &models.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &models.JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
@@ -51,7 +61,6 @@ func (app *Application) getUserFromJWT(r *http.Request) (models.User, error) {
 		return models.User{}, errors.New("invalid token claims")
 	}
 
-	// Verify device still exists and is valid
 	device, err := app.UserRepo.GetDeviceByFingerprint(claims.UserID, claims.DeviceFingerprint)
 	if err != nil {
 		return models.User{}, errors.New("device not found")
@@ -61,13 +70,24 @@ func (app *Application) getUserFromJWT(r *http.Request) (models.User, error) {
 		return models.User{}, errors.New("device expired")
 	}
 
-	// Get user from database
 	user, err := app.UserRepo.Get(claims.UserID)
 	if err != nil {
 		return models.User{}, err
 	}
 
 	return user, nil
+}
+
+// getUserFromJWT resolves the user from Authorization: Bearer, else access_token cookie.
+func (app *Application) getUserFromJWT(r *http.Request) (models.User, error) {
+	if bearer := bearerTokenFromRequest(r); bearer != "" {
+		return app.userFromAccessTokenString(bearer)
+	}
+	cookie, err := r.Cookie(models.JWT.ACCESS_COOKIE_NAME)
+	if err != nil {
+		return models.User{}, errors.New("no JWT cookie found")
+	}
+	return app.userFromAccessTokenString(cookie.Value)
 }
 
 func (app *Application) getUserFromToken(w http.ResponseWriter, r *http.Request) (models.User, error) {
