@@ -111,18 +111,20 @@ type EquipItemRequest struct {
 
 // UseItemRequest represents a request to use a consumable item
 type UseItemRequest struct {
-	InventoryID int `json:"inventoryId"`
+	InventoryID  int    `json:"inventoryId"`
+	TargetUserID string `json:"targetUserId,omitempty"`
 }
 
 // UseItemResponse describes the outcome of using an item
 type UseItemResponse struct {
-	Message        string             `json:"message"`
-	InventoryID    int                `json:"inventoryId"`
-	QuantityLeft   int                `json:"quantityLeft"`
-	UsedCount      int                `json:"usedCount"`
-	EffectMetadata map[string]any     `json:"effectMetadata,omitempty"`
-	Item           *ShopItem          `json:"item,omitempty"`
-	InventoryItem  *UserInventoryItem `json:"inventory,omitempty"`
+	Message               string             `json:"message"`
+	InventoryID           int                `json:"inventoryId"`
+	QuantityLeft          int                `json:"quantityLeft"`
+	UsedCount             int                `json:"usedCount"`
+	EffectMetadata        map[string]any     `json:"effectMetadata,omitempty"`
+	EffectRecipientUserID string             `json:"effectRecipientUserId,omitempty"`
+	Item                  *ShopItem          `json:"item,omitempty"`
+	InventoryItem         *UserInventoryItem `json:"inventory,omitempty"`
 }
 
 // GenerateItemID creates a new unique ID for a shop item

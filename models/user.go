@@ -31,6 +31,10 @@ type UserUpdateRequest struct {
 	Email    string `json:"email"`
 }
 
+type UserEffectResponse struct {
+	UserEffect *string `json:"userEffect"`
+}
+
 type User struct {
 	UserID         string    `json:"userId" db:"user_id"`
 	Username       string    `json:"username" db:"username"`
@@ -41,6 +45,7 @@ type User struct {
 	Points         int       `json:"points" db:"points"`
 	Level          int       `json:"level" db:"level"`
 	Credits        int       `json:"credits" db:"credits"`
+	UserEffect     *string   `json:"userEffect,omitempty" db:"user_effect"`
 	CreatedAt      time.Time `json:"createdAt" db:"created_at"`
 	UpdatedAt      time.Time `json:"updatedAt" db:"updated_at"`
 }
