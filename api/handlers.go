@@ -335,6 +335,58 @@ func (app *Application) getCurrentUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(user)
 }
 
+// GET /v1/users/me/effect — active effect; DELETE — clear after use
+func (app *Application) handleCurrentUserEffect(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		app.getCurrentUserEffect(w, r)
+	case http.MethodDelete:
+		app.removeCurrentUserEffect(w, r)
+	default:
+		w.Header().Set("Allow", "GET, DELETE")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// GET /v1/users/me/effect - Get current user's active powerup/debuff payload (JSON text or null)
+func (app *Application) getCurrentUserEffect(w http.ResponseWriter, r *http.Request) {
+	user, err := app.getUserFromToken(w, r)
+	if err != nil {
+		return
+	}
+
+	effect, err := app.UserRepo.GetUserEffect(user.UserID)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(models.UserEffectResponse{UserEffect: effect})
+}
+
+// DELETE /v1/users/me/effect - Clear active effect (e.g. after it is consumed)
+func (app *Application) removeCurrentUserEffect(w http.ResponseWriter, r *http.Request) {
+	user, err := app.getUserFromToken(w, r)
+	if err != nil {
+		return
+	}
+
+	if err := app.UserRepo.RemoveUserEffect(user.UserID); err != nil {
+		if _, ok := err.(datastore.NoRowsError); ok {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(models.UserEffectResponse{UserEffect: nil})
+}
+
 // PUT /v1/users/me - Update current authenticated user
 func (app *Application) updateCurrentUser(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {

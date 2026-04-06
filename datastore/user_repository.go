@@ -14,6 +14,8 @@ import (
 type UserRepository interface {
 	Create(user models.User) (models.User, error)
 	Get(userID string) (models.User, error)
+	GetUserEffect(userID string) (*string, error)
+	RemoveUserEffect(userID string) error
 	GetUserByEmail(email string) (models.User, error)
 	GetUserByUsername(username string) (models.User, error)
 	DeleteUserByID(userID string) error
@@ -42,6 +44,21 @@ func (nr NoRowsError) Error() string {
 	return fmt.Sprintf("%v: no rows returned for scan: %v", nr.NoRows, nr.Err)
 }
 
+func userEffectFromNull(ns sql.NullString) *string {
+	if !ns.Valid {
+		return nil
+	}
+	s := ns.String
+	return &s
+}
+
+func userEffectArg(effect *string) interface{} {
+	if effect == nil {
+		return nil
+	}
+	return *effect
+}
+
 type UserDatabase struct {
 	database *sql.DB
 }
@@ -60,6 +77,7 @@ func (pgdb UserDatabase) Create(user models.User) (models.User, error) {
 			points,
 			level,
 			credits,
+			user_effect,
 			created_at,
 			updated_at
 		) VALUES (
@@ -73,7 +91,8 @@ func (pgdb UserDatabase) Create(user models.User) (models.User, error) {
 			$8,
 			$9,
 			$10,
-			$11
+			$11,
+			$12
 		)`,
 		user.UserID,
 		user.Username,
@@ -84,6 +103,7 @@ func (pgdb UserDatabase) Create(user models.User) (models.User, error) {
 		user.Points,
 		user.Level,
 		user.Credits,
+		userEffectArg(user.UserEffect),
 		user.CreatedAt,
 		user.UpdatedAt,
 	)
@@ -109,6 +129,7 @@ func (pgdb UserDatabase) Get(userID string) (models.User, error) {
 		points,
 		level,
 		credits,
+		user_effect,
 		created_at,
 		updated_at
 	FROM users 
@@ -117,6 +138,7 @@ func (pgdb UserDatabase) Get(userID string) (models.User, error) {
 	row := db.QueryRow(sqlStatement, userID)
 
 	var user models.User
+	var userEffect sql.NullString
 	scanErr := row.Scan(
 		&user.UserID,
 		&user.Username,
@@ -127,6 +149,7 @@ func (pgdb UserDatabase) Get(userID string) (models.User, error) {
 		&user.Points,
 		&user.Level,
 		&user.Credits,
+		&userEffect,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -135,10 +158,44 @@ func (pgdb UserDatabase) Get(userID string) (models.User, error) {
 	case sql.ErrNoRows:
 		return models.User{}, NoRowsError{true, scanErr}
 	case nil:
+		user.UserEffect = userEffectFromNull(userEffect)
 		return user, nil
 	default:
 		return models.User{}, scanErr
 	}
+}
+
+func (pgdb UserDatabase) GetUserEffect(userID string) (*string, error) {
+	db := pgdb.database
+	row := db.QueryRow(`SELECT user_effect FROM users WHERE user_id = $1`, userID)
+	var userEffect sql.NullString
+	if scanErr := row.Scan(&userEffect); scanErr != nil {
+		if scanErr == sql.ErrNoRows {
+			return nil, NoRowsError{true, scanErr}
+		}
+		return nil, scanErr
+	}
+	return userEffectFromNull(userEffect), nil
+}
+
+func (pgdb UserDatabase) RemoveUserEffect(userID string) error {
+	db := pgdb.database
+	res, err := db.Exec(`
+		UPDATE users
+		SET user_effect = NULL, updated_at = $2
+		WHERE user_id = $1`,
+		userID, time.Now())
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return NoRowsError{true, sql.ErrNoRows}
+	}
+	return nil
 }
 
 func (pgdb UserDatabase) GetAllUsers() ([]models.User, error) {
@@ -154,6 +211,7 @@ func (pgdb UserDatabase) GetAllUsers() ([]models.User, error) {
 		points,
 		level,
 		credits,
+		user_effect,
 		created_at,
 		updated_at
 	FROM users
@@ -168,6 +226,7 @@ func (pgdb UserDatabase) GetAllUsers() ([]models.User, error) {
 	var users []models.User
 	for rows.Next() {
 		var user models.User
+		var userEffect sql.NullString
 		scanErr := rows.Scan(
 			&user.UserID,
 			&user.Username,
@@ -178,12 +237,14 @@ func (pgdb UserDatabase) GetAllUsers() ([]models.User, error) {
 			&user.Points,
 			&user.Level,
 			&user.Credits,
+			&userEffect,
 			&user.CreatedAt,
 			&user.UpdatedAt,
 		)
 		if scanErr != nil {
 			return []models.User{}, scanErr
 		}
+		user.UserEffect = userEffectFromNull(userEffect)
 		users = append(users, user)
 	}
 	if rows.Err() != nil {
@@ -207,6 +268,7 @@ func (pgdb UserDatabase) GetUserByEmail(email string) (models.User, error) {
 			points,
 			level,
 			credits,
+			user_effect,
 			created_at,
 			updated_at
 		FROM users
@@ -215,6 +277,7 @@ func (pgdb UserDatabase) GetUserByEmail(email string) (models.User, error) {
 	row := db.QueryRow(sqlStatement, email)
 
 	var user models.User
+	var userEffect sql.NullString
 	scanErr := row.Scan(
 		&user.UserID,
 		&user.Username,
@@ -225,6 +288,7 @@ func (pgdb UserDatabase) GetUserByEmail(email string) (models.User, error) {
 		&user.Points,
 		&user.Level,
 		&user.Credits,
+		&userEffect,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -233,6 +297,7 @@ func (pgdb UserDatabase) GetUserByEmail(email string) (models.User, error) {
 	case sql.ErrNoRows:
 		return models.User{}, NoRowsError{true, scanErr}
 	case nil:
+		user.UserEffect = userEffectFromNull(userEffect)
 		return user, nil
 	default:
 		return models.User{}, scanErr
@@ -253,6 +318,7 @@ func (pgdb UserDatabase) GetUserByUsername(username string) (models.User, error)
 			points,
 			level,
 			credits,
+			user_effect,
 			created_at,
 			updated_at
 		FROM users
@@ -261,6 +327,7 @@ func (pgdb UserDatabase) GetUserByUsername(username string) (models.User, error)
 	row := db.QueryRow(sqlStatement, username)
 
 	var user models.User
+	var userEffect sql.NullString
 	scanErr := row.Scan(
 		&user.UserID,
 		&user.Username,
@@ -271,6 +338,7 @@ func (pgdb UserDatabase) GetUserByUsername(username string) (models.User, error)
 		&user.Points,
 		&user.Level,
 		&user.Credits,
+		&userEffect,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -279,6 +347,7 @@ func (pgdb UserDatabase) GetUserByUsername(username string) (models.User, error)
 	case sql.ErrNoRows:
 		return models.User{}, NoRowsError{true, scanErr}
 	case nil:
+		user.UserEffect = userEffectFromNull(userEffect)
 		return user, nil
 	default:
 		return models.User{}, scanErr
@@ -307,7 +376,8 @@ func (pgdb UserDatabase) Update(user models.User) (models.User, error) {
 		points = $5,
 		level = $6,
 		credits = $7,
-		updated_at = $8
+		user_effect = $8,
+		updated_at = $9
 	WHERE user_id = $1
 	`
 	_, insertErr := db.Exec(sqlStatement,
@@ -318,6 +388,7 @@ func (pgdb UserDatabase) Update(user models.User) (models.User, error) {
 		user.Points,
 		user.Level,
 		user.Credits,
+		userEffectArg(user.UserEffect),
 		time.Now(),
 	)
 
@@ -340,6 +411,7 @@ func (pgdb UserDatabase) ValidateAndGetUser(credentials models.Credentials) (mod
 		points,
 		level,
 		credits,
+		user_effect,
 		created_at,
 		updated_at
 	FROM users
@@ -347,6 +419,7 @@ func (pgdb UserDatabase) ValidateAndGetUser(credentials models.Credentials) (mod
 	`
 	var user models.User
 	var passwordHash string
+	var userEffect sql.NullString
 
 	row := db.QueryRow(sqlStatement, credentials.Email)
 	scanErr := row.Scan(
@@ -359,12 +432,14 @@ func (pgdb UserDatabase) ValidateAndGetUser(credentials models.Credentials) (mod
 		&user.Points,
 		&user.Level,
 		&user.Credits,
+		&userEffect,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
 	if scanErr != nil {
 		return models.User{}, fmt.Errorf("error in row scan %v", scanErr)
 	}
+	user.UserEffect = userEffectFromNull(userEffect)
 
 	bcryptErr := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(credentials.Password))
 	if bcryptErr != nil {

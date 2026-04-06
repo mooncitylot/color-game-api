@@ -76,6 +76,7 @@ func (app Application) BuildRoutes(mux *http.ServeMux) *http.ServeMux {
 	mux.HandleFunc("/v1/leaderboard", app.getLeaderboard)
 
 	// Authenticated endpoints
+	mux.HandleFunc("/v1/users/me/effect", app.authenticate(app.handleCurrentUserEffect))
 	mux.HandleFunc("/v1/users/me", app.authenticate(app.getCurrentUser))
 	mux.HandleFunc("/v1/users/me/update", app.authenticate(app.updateCurrentUser))
 	mux.HandleFunc("/v1/scores/submit", app.authenticate(app.submitScore))

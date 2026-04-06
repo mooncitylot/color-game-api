@@ -7,10 +7,20 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/color-game/api/datastore"
 	"github.com/color-game/api/models"
+)
+
+var (
+	errInvalidEffectTarget    = errors.New(`invalid effect_target: use "self" or "other"`)
+	errEffectNeedsTarget      = errors.New("targetUserId is required for this item")
+	errEffectCannotTargetSelf = errors.New("cannot target yourself")
+	errEffectTargetNotFound   = errors.New("target user not found")
+	errEffectTargetNotFriend  = errors.New("target must be an accepted friend")
+	errEffectInvalidShape     = errors.New("metadata.effect must be a JSON object")
 )
 
 // ============= SHOP ITEMS =============
@@ -298,6 +308,84 @@ func (app *Application) equipItem(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// applyPersistedUserEffect writes metadata.effect to users.user_effect for self or an accepted friend (effect_target).
+func (app *Application) applyPersistedUserEffect(actor models.User, useReq models.UseItemRequest, effectMetadata map[string]any) (string, error) {
+	if len(effectMetadata) == 0 {
+		return "", nil
+	}
+	raw, ok := effectMetadata["effect"]
+	if !ok || raw == nil {
+		return "", nil
+	}
+	effectMap, ok := raw.(map[string]any)
+	if !ok {
+		return "", errEffectInvalidShape
+	}
+
+	target := "self"
+	if v, ok := effectMetadata["effect_target"].(string); ok && strings.TrimSpace(v) != "" {
+		target = strings.ToLower(strings.TrimSpace(v))
+	}
+
+	var recipientUserID string
+	switch target {
+	case "self":
+		recipientUserID = actor.UserID
+	case "other":
+		tid := strings.TrimSpace(useReq.TargetUserID)
+		if tid == "" {
+			return "", errEffectNeedsTarget
+		}
+		if tid == actor.UserID {
+			return "", errEffectCannotTargetSelf
+		}
+		if _, err := app.UserRepo.Get(tid); err != nil {
+			if _, ok := err.(datastore.NoRowsError); ok {
+				return "", errEffectTargetNotFound
+			}
+			return "", err
+		}
+		fs, err := app.FriendRepo.GetFriendshipBetween(actor.UserID, tid)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", errEffectTargetNotFriend
+			}
+			return "", err
+		}
+		if fs.Status != models.FriendshipStatusAccepted {
+			return "", errEffectTargetNotFriend
+		}
+		recipientUserID = tid
+	default:
+		return "", errInvalidEffectTarget
+	}
+
+	payload := make(map[string]any, len(effectMap)+1)
+	for k, v := range effectMap {
+		payload[k] = v
+	}
+	if recipientUserID != actor.UserID {
+		payload["appliedByUserId"] = actor.UserID
+	}
+
+	jsonBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	s := string(jsonBytes)
+
+	recipient, err := app.UserRepo.Get(recipientUserID)
+	if err != nil {
+		return "", err
+	}
+	recipient.UserEffect = &s
+	recipient.UpdatedAt = time.Now()
+	if _, err := app.UserRepo.Update(recipient); err != nil {
+		return "", err
+	}
+	return recipientUserID, nil
+}
+
 // POST /v1/inventory/use - Use a consumable item
 func (app *Application) useItem(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -383,6 +471,26 @@ func (app *Application) useItem(w http.ResponseWriter, r *http.Request) {
 		UsedCount:     updatedItem.UsedCount,
 		Item:          &shopItem,
 		InventoryItem: &updatedItem,
+	}
+
+	// TODO: item is already consumed; if applyEffectErr is non-nil the user loses the item without effect — use a DB transaction if this becomes an issue.
+	effectRecipientID, applyEffectErr := app.applyPersistedUserEffect(user, useReq, effectMetadata)
+	if applyEffectErr != nil {
+		switch {
+		case errors.Is(applyEffectErr, errInvalidEffectTarget),
+			errors.Is(applyEffectErr, errEffectNeedsTarget),
+			errors.Is(applyEffectErr, errEffectCannotTargetSelf),
+			errors.Is(applyEffectErr, errEffectTargetNotFound),
+			errors.Is(applyEffectErr, errEffectTargetNotFriend),
+			errors.Is(applyEffectErr, errEffectInvalidShape):
+			app.badRequest(w, r, applyEffectErr)
+		default:
+			app.internalServerError(w, r, applyEffectErr)
+		}
+		return
+	}
+	if effectRecipientID != "" {
+		response.EffectRecipientUserID = effectRecipientID
 	}
 
 	// Apply effect logic for consumables like Extra Scan
