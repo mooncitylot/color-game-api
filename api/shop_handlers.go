@@ -15,12 +15,13 @@ import (
 )
 
 var (
-	errInvalidEffectTarget    = errors.New(`invalid effect_target: use "self" or "other"`)
-	errEffectNeedsTarget      = errors.New("targetUserId is required for this item")
-	errEffectCannotTargetSelf = errors.New("cannot target yourself")
-	errEffectTargetNotFound   = errors.New("target user not found")
-	errEffectTargetNotFriend  = errors.New("target must be an accepted friend")
-	errEffectInvalidShape     = errors.New("metadata.effect must be a JSON object")
+	errInvalidEffectTarget            = errors.New(`invalid effect_target: use "self" or "other"`)
+	errEffectNeedsTarget              = errors.New("targetUserId is required for this item")
+	errEffectCannotTargetSelf         = errors.New("cannot target yourself")
+	errEffectTargetNotFound           = errors.New("target user not found")
+	errEffectTargetNotFriend          = errors.New("target must be an accepted friend")
+	errEffectInvalidShape             = errors.New("metadata.effect must be a JSON object")
+	errEffectTargetMetadataMismatch   = errors.New(`shop_items.metadata must set effect_target to "other" when targeting a friend; check the row for this item (key effect_target)`)
 )
 
 // ============= SHOP ITEMS =============
@@ -327,6 +328,37 @@ func effectObjectFromMetadata(raw interface{}) (map[string]any, error) {
 	return out, nil
 }
 
+// effectTargetFromMetadata resolves effect_target from shop JSON (supports alternate keys and non-string encodings).
+func effectTargetFromMetadata(effectMetadata map[string]any) string {
+	keys := []string{"effect_target", "effectTarget", "Effect_target"}
+	for _, k := range keys {
+		raw, ok := effectMetadata[k]
+		if !ok || raw == nil {
+			continue
+		}
+		s := strings.TrimSpace(effectTargetRawToString(raw))
+		if s == "" {
+			continue
+		}
+		low := strings.ToLower(s)
+		if low == "self" || low == "other" {
+			return low
+		}
+	}
+	return "self"
+}
+
+func effectTargetRawToString(raw interface{}) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+}
+
 // applyPersistedUserEffect writes metadata.effect to users.user_effect for self or an accepted friend (effect_target).
 func (app *Application) applyPersistedUserEffect(actor models.User, useReq models.UseItemRequest, effectMetadata map[string]any) (string, error) {
 	if len(effectMetadata) == 0 {
@@ -341,9 +373,9 @@ func (app *Application) applyPersistedUserEffect(actor models.User, useReq model
 		return "", err
 	}
 
-	target := "self"
-	if v, ok := effectMetadata["effect_target"].(string); ok && strings.TrimSpace(v) != "" {
-		target = strings.ToLower(strings.TrimSpace(v))
+	target := effectTargetFromMetadata(effectMetadata)
+	if strings.TrimSpace(useReq.TargetUserID) != "" && target == "self" {
+		return "", errEffectTargetMetadataMismatch
 	}
 
 	var recipientUserID string
@@ -495,7 +527,8 @@ func (app *Application) useItem(w http.ResponseWriter, r *http.Request) {
 			errors.Is(applyEffectErr, errEffectCannotTargetSelf),
 			errors.Is(applyEffectErr, errEffectTargetNotFound),
 			errors.Is(applyEffectErr, errEffectTargetNotFriend),
-			errors.Is(applyEffectErr, errEffectInvalidShape):
+			errors.Is(applyEffectErr, errEffectInvalidShape),
+			errors.Is(applyEffectErr, errEffectTargetMetadataMismatch):
 			app.badRequest(w, r, applyEffectErr)
 		default:
 			app.internalServerError(w, r, applyEffectErr)
