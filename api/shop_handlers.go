@@ -308,6 +308,25 @@ func (app *Application) equipItem(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
+// effectObjectFromMetadata normalizes metadata.effect to a map (handles nested JSON types from decoding).
+func effectObjectFromMetadata(raw interface{}) (map[string]any, error) {
+	if raw == nil {
+		return nil, errEffectInvalidShape
+	}
+	if m, ok := raw.(map[string]any); ok {
+		return m, nil
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return nil, errEffectInvalidShape
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, errEffectInvalidShape
+	}
+	return out, nil
+}
+
 // applyPersistedUserEffect writes metadata.effect to users.user_effect for self or an accepted friend (effect_target).
 func (app *Application) applyPersistedUserEffect(actor models.User, useReq models.UseItemRequest, effectMetadata map[string]any) (string, error) {
 	if len(effectMetadata) == 0 {
@@ -317,9 +336,9 @@ func (app *Application) applyPersistedUserEffect(actor models.User, useReq model
 	if !ok || raw == nil {
 		return "", nil
 	}
-	effectMap, ok := raw.(map[string]any)
-	if !ok {
-		return "", errEffectInvalidShape
+	effectMap, err := effectObjectFromMetadata(raw)
+	if err != nil {
+		return "", err
 	}
 
 	target := "self"
@@ -374,13 +393,7 @@ func (app *Application) applyPersistedUserEffect(actor models.User, useReq model
 	}
 	s := string(jsonBytes)
 
-	recipient, err := app.UserRepo.Get(recipientUserID)
-	if err != nil {
-		return "", err
-	}
-	recipient.UserEffect = &s
-	recipient.UpdatedAt = time.Now()
-	if _, err := app.UserRepo.Update(recipient); err != nil {
+	if err := app.UserRepo.SetUserEffect(recipientUserID, s); err != nil {
 		return "", err
 	}
 	return recipientUserID, nil

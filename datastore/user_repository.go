@@ -15,6 +15,7 @@ type UserRepository interface {
 	Create(user models.User) (models.User, error)
 	Get(userID string) (models.User, error)
 	GetUserEffect(userID string) (*string, error)
+	SetUserEffect(userID string, effectJSON string) error
 	RemoveUserEffect(userID string) error
 	GetUserByEmail(email string) (models.User, error)
 	GetUserByUsername(username string) (models.User, error)
@@ -176,6 +177,28 @@ func (pgdb UserDatabase) GetUserEffect(userID string) (*string, error) {
 		return nil, scanErr
 	}
 	return userEffectFromNull(userEffect), nil
+}
+
+// SetUserEffect sets users.user_effect for one user and fails if no row was updated.
+func (pgdb UserDatabase) SetUserEffect(userID string, effectJSON string) error {
+	db := pgdb.database
+	res, err := db.Exec(`
+		UPDATE users
+		SET user_effect = $2, updated_at = $3
+		WHERE user_id = $1`,
+		userID, effectJSON, time.Now(),
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("set user_effect: expected 1 row updated, got %d for user_id=%s", n, userID)
+	}
+	return nil
 }
 
 func (pgdb UserDatabase) RemoveUserEffect(userID string) error {
