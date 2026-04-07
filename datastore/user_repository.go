@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	_ "github.com/lib/pq"
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/color-game/api/models"
+	"github.com/lib/pq"
 )
 
 type UserRepository interface {
@@ -23,6 +23,8 @@ type UserRepository interface {
 	Update(user models.User) (models.User, error)
 	ValidateAndGetUser(userLogin models.Credentials) (models.User, error)
 	GetAllUsers() ([]models.User, error)
+	GetTopByTotalPoints(limit int) ([]models.PointsLeaderboardEntry, error)
+	GetTopByTotalPointsAmong(userIDs []string, limit int) ([]models.PointsLeaderboardEntry, error)
 
 	// Device management
 	CreateDevice(device models.UserDevice) error
@@ -275,6 +277,58 @@ func (pgdb UserDatabase) GetAllUsers() ([]models.User, error) {
 	}
 
 	return users, nil
+}
+
+func (pgdb UserDatabase) GetTopByTotalPoints(limit int) ([]models.PointsLeaderboardEntry, error) {
+	db := pgdb.database
+	sqlStatement := `
+		SELECT user_id, username, points, level
+		FROM users
+		ORDER BY points DESC, username ASC
+		LIMIT $1`
+	rows, err := db.Query(sqlStatement, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPointsLeaderboardRows(rows)
+}
+
+func (pgdb UserDatabase) GetTopByTotalPointsAmong(userIDs []string, limit int) ([]models.PointsLeaderboardEntry, error) {
+	if len(userIDs) == 0 {
+		return []models.PointsLeaderboardEntry{}, nil
+	}
+	db := pgdb.database
+	sqlStatement := `
+		SELECT user_id, username, points, level
+		FROM users
+		WHERE user_id = ANY($1)
+		ORDER BY points DESC, username ASC
+		LIMIT $2`
+	rows, err := db.Query(sqlStatement, pq.Array(userIDs), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanPointsLeaderboardRows(rows)
+}
+
+func scanPointsLeaderboardRows(rows *sql.Rows) ([]models.PointsLeaderboardEntry, error) {
+	var entries []models.PointsLeaderboardEntry
+	rank := 1
+	for rows.Next() {
+		var e models.PointsLeaderboardEntry
+		if err := rows.Scan(&e.UserID, &e.Username, &e.Points, &e.Level); err != nil {
+			return nil, err
+		}
+		e.Rank = rank
+		rank++
+		entries = append(entries, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return entries, nil
 }
 
 func (pgdb UserDatabase) GetUserByEmail(email string) (models.User, error) {

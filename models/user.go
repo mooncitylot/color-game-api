@@ -57,6 +57,15 @@ type UserSummary struct {
 	Level    int    `json:"level" db:"level"`
 }
 
+// PointsLeaderboardEntry is a ranked row for total accumulated points leaderboards.
+type PointsLeaderboardEntry struct {
+	Rank     int    `json:"rank"`
+	UserID   string `json:"userId"`
+	Username string `json:"username"`
+	Points   int    `json:"points"`
+	Level    int    `json:"level"`
+}
+
 type UserDevice struct {
 	ID          string    `json:"id" db:"id"`
 	UserID      string    `json:"userId" db:"user_id"`

@@ -8,6 +8,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/color-game/api/datastore"
@@ -777,6 +778,53 @@ func (app *Application) getLeaderboard(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(leaderboard)
+}
+
+// GET /v1/leaderboard/points?scope=global|friends — top users by accumulated points (not daily best).
+func (app *Application) getPointsLeaderboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	user, err := app.getUserFromToken(w, r)
+	if err != nil {
+		return
+	}
+
+	scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
+	if scope == "" {
+		scope = "global"
+	}
+
+	var entries []models.PointsLeaderboardEntry
+	switch scope {
+	case "global":
+		entries, err = app.UserRepo.GetTopByTotalPoints(10)
+	case "friends":
+		friends, ferr := app.FriendRepo.ListFriends(user.UserID)
+		if ferr != nil {
+			app.internalServerError(w, r, ferr)
+			return
+		}
+		ids := []string{user.UserID}
+		for _, f := range friends {
+			ids = append(ids, f.Friend.UserID)
+		}
+		entries, err = app.UserRepo.GetTopByTotalPointsAmong(ids, 10)
+	default:
+		http.Error(w, "invalid scope (use global or friends)", http.StatusBadRequest)
+		return
+	}
+
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(entries)
 }
 
 // GET /v1/scores/history - Get user's score history

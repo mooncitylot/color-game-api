@@ -74,6 +74,7 @@ func (app Application) BuildRoutes(mux *http.ServeMux) *http.ServeMux {
 	mux.HandleFunc("/v1/colors/daily", app.getDailyColor)
 	mux.HandleFunc("/v1/colors/daily/all", app.getAllDailyColors)
 	mux.HandleFunc("/v1/leaderboard", app.getLeaderboard)
+	mux.HandleFunc("/v1/leaderboard/points", app.authenticate(app.getPointsLeaderboard))
 
 	// Authenticated endpoints
 	mux.HandleFunc("/v1/users/me/effect", app.authenticate(app.handleCurrentUserEffect))
