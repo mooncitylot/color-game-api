@@ -27,4 +27,5 @@ type Application struct {
 	DailyLeaderboardRepo datastore.DailyLeaderboardRepository
 	ShopRepo             datastore.ShopRepository
 	FriendRepo           datastore.FriendRepository
+	PushRepo             datastore.PushNotificationDatabase
 }

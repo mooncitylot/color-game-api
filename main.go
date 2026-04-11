@@ -91,6 +91,12 @@ func main() {
 		log.Fatalf("Failed to create shop repository: %v", shopRepoErr)
 	}
 
+	// Create push notification repository
+	pushRepo, pushRepoErr := datastore.NewPushNotificationDatabase(dbConn)
+	if pushRepoErr != nil {
+		log.Fatalf("Failed to create push notification repository: %v", pushRepoErr)
+	}
+
 	// Create application
 	app := &api.Application{
 		Config:               config,
@@ -100,6 +106,7 @@ func main() {
 		DailyLeaderboardRepo: dailyLeaderboardRepo,
 		ShopRepo:             shopRepo,
 		FriendRepo:           friendRepo,
+		PushRepo:             pushRepo,
 	}
 
 	// Start scheduler for daily color generation

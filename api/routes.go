@@ -114,6 +114,11 @@ func (app Application) BuildRoutes(mux *http.ServeMux) *http.ServeMux {
 	mux.HandleFunc("/v1/admin/users/credits", app.verifyPermissions(app.addUserCredits))
 	mux.HandleFunc("/v1/admin/shop/purchases", app.verifyPermissions(app.getAdminPurchases))
 	mux.HandleFunc("/v1/admin/scores/reset", app.verifyPermissions(app.resetUserDailyAttempts))
+	mux.HandleFunc("/v1/admin/push/send", app.verifyPermissions(app.sendPushNotification))
+
+	// Push notification endpoints
+	mux.HandleFunc("/v1/push/subscribe", app.authenticate(app.handlePushSubscription))
+	mux.HandleFunc("/v1/push/subscriptions", app.authenticate(app.getPushSubscriptions))
 
 	// Wrap entire mux with CORS and origins check
 	finalMux.Handle("/", wrapMuxWithCorsAndOrigins(mux, app))

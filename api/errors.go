@@ -75,6 +75,18 @@ func (app *Application) requirePutMethod(w http.ResponseWriter, r *http.Request,
 	json.NewEncoder(w).Encode(postMethodRequired)
 }
 
+func (app *Application) requireMethod(w http.ResponseWriter, r *http.Request, allowedMethods string, err error) {
+	w.Header().Set("Allow", allowedMethods)
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	methodErr := HandlerError{
+		ErrorName:        "Method Not Allowed",
+		Description:      err.Error() + " you used: " + r.Method,
+		PossibleSolution: fmt.Sprintf("Use one of: %s", allowedMethods),
+		CallerInfo:       getCallerInfo(),
+	}
+	json.NewEncoder(w).Encode(methodErr)
+}
+
 func (app *Application) badJSONRequest(w http.ResponseWriter, r *http.Request, err error) {
 	w.WriteHeader(http.StatusBadRequest)
 	jsonErr := HandlerError{

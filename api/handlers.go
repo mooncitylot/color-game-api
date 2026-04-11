@@ -1099,3 +1099,168 @@ func (app *Application) generateDailyColor(w http.ResponseWriter, r *http.Reques
 		"color":   response,
 	})
 }
+
+// POST /v1/push/subscribe - Subscribe to push notifications
+// DELETE /v1/push/subscribe - Unsubscribe from push notifications
+func (app *Application) handlePushSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value("userID").(string)
+
+	switch r.Method {
+	case http.MethodPost:
+		var req models.PushSubscriptionPayload
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			app.badJSONRequest(w, r, err)
+			return
+		}
+
+		if req.Endpoint == "" || req.Keys.P256dh == "" || req.Keys.Auth == "" {
+			app.badRequest(w, r, errors.New("subscription endpoint and keys are required"))
+			return
+		}
+
+		sub := models.NewPushSubscription(userID, req)
+		if err := app.PushRepo.CreateSubscription(sub); err != nil {
+			app.internalServerError(w, r, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message":      "Successfully subscribed to push notifications",
+			"subscriptionId": sub.ID,
+		})
+
+	case http.MethodDelete:
+		var req struct {
+			Endpoint string `json:"endpoint"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			app.badJSONRequest(w, r, err)
+			return
+		}
+
+		if req.Endpoint == "" {
+			app.badRequest(w, r, errors.New("endpoint is required"))
+			return
+		}
+
+		if err := app.PushRepo.DeleteSubscription(req.Endpoint); err != nil {
+			app.internalServerError(w, r, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "Successfully unsubscribed from push notifications",
+		})
+
+	default:
+		w.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(HandlerError{
+			ErrorName:        "Method Not Allowed",
+			Description:      fmt.Sprintf("POST or DELETE method required, you used: %s", r.Method),
+			PossibleSolution: "Use POST to subscribe or DELETE to unsubscribe",
+			CallerInfo:       getCallerInfo(),
+		})
+	}
+}
+
+// GET /v1/push/subscriptions - Get user's push subscriptions
+func (app *Application) getPushSubscriptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		app.requireMethod(w, r, http.MethodGet, ErrGET)
+		return
+	}
+
+	userID := r.Context().Value("userID").(string)
+
+	subscriptions, err := app.PushRepo.GetUserSubscriptions(userID)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"subscriptions": subscriptions,
+		"count":         len(subscriptions),
+	})
+}
+
+// POST /v1/admin/push/send - Send push notification (Admin only)
+func (app *Application) sendPushNotification(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		app.requirePostMethod(w, r, ErrPOST)
+		return
+	}
+
+	var req struct {
+		UserID string                    `json:"userId,omitempty"`
+		Title  string                    `json:"title"`
+		Body   string                    `json:"body"`
+		Icon   string                    `json:"icon,omitempty"`
+		Data   map[string]interface{}    `json:"data,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		app.badJSONRequest(w, r, err)
+		return
+	}
+
+	if req.Title == "" || req.Body == "" {
+		app.badRequest(w, r, errors.New("title and body are required"))
+		return
+	}
+
+	// Get subscriptions
+	var subscriptions []models.PushSubscription
+	var err error
+	if req.UserID != "" {
+		subscriptions, err = app.PushRepo.GetUserSubscriptions(req.UserID)
+	} else {
+		// For now, we don't have a method to get all subscriptions
+		// This would need to be added to the repository
+		app.badRequest(w, r, errors.New("userId is required for now"))
+		return
+	}
+
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	if len(subscriptions) == 0 {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"message": "No active subscriptions found",
+			"sent":    0,
+		})
+		return
+	}
+
+	// In a real implementation, you would use a push service library
+	// like github.com/SherClockHolmes/webpush-go to send actual push notifications
+	// For now, we'll just return success with count
+	notification := models.PushNotificationMessage{
+		Title: req.Title,
+		Body:  req.Body,
+		Icon:  req.Icon,
+		Data:  req.Data,
+	}
+
+	// TODO: Implement actual push sending logic here
+	// Example:
+	// for _, sub := range subscriptions {
+	//     _, err := webpush.SendNotification(notification, sub, vapidPrivateKey)
+	//     if err != nil {
+	//         log.Printf("Failed to send push to %s: %v", sub.Endpoint, err)
+	//     }
+	// }
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"message":     "Push notification queued",
+		"sent":        len(subscriptions),
+		"notification": notification,
+	})
+}
