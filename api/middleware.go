@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -113,7 +114,9 @@ func (app *Application) authenticate(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		h.ServeHTTP(w, r)
+		// Set userID in context so handlers can access it
+		ctx := context.WithValue(r.Context(), "userID", user.UserID)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	}
 }
 
@@ -131,6 +134,8 @@ func (app *Application) verifyPermissions(h http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 
-		h.ServeHTTP(w, r)
+		// Set userID in context so handlers can access it
+		ctx := context.WithValue(r.Context(), "userID", user.UserID)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	}
 }

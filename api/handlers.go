@@ -1103,7 +1103,18 @@ func (app *Application) generateDailyColor(w http.ResponseWriter, r *http.Reques
 // POST /v1/push/subscribe - Subscribe to push notifications
 // DELETE /v1/push/subscribe - Unsubscribe from push notifications
 func (app *Application) handlePushSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := r.Context().Value("userID").(string)
+	// SAFETY CHECK - userID must exist in context
+	userIDValue := r.Context().Value("userID")
+	if userIDValue == nil {
+		app.invalidAuthorization(w, r, errors.New("authentication required"))
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok {
+		app.invalidAuthorization(w, r, errors.New("invalid userID type"))
+		return
+	}
 
 	switch r.Method {
 	case http.MethodPost:
@@ -1173,7 +1184,18 @@ func (app *Application) getPushSubscriptions(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	userID := r.Context().Value("userID").(string)
+	// SAFETY CHECK - userID must exist in context
+	userIDValue := r.Context().Value("userID")
+	if userIDValue == nil {
+		app.invalidAuthorization(w, r, errors.New("authentication required"))
+		return
+	}
+
+	userID, ok := userIDValue.(string)
+	if !ok {
+		app.invalidAuthorization(w, r, errors.New("invalid userID type"))
+		return
+	}
 
 	subscriptions, err := app.PushRepo.GetUserSubscriptions(userID)
 	if err != nil {
