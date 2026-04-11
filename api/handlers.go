@@ -17,8 +17,28 @@ import (
 )
 
 type authTokenResponse struct {
-	AccessToken string `json:"accessToken"`
-	ExpiresAt   string `json:"expiresAt"`
+	ExpiresAt string `json:"expiresAt"`
+}
+
+// clearAuthCookies removes JWT cookies (must match Path/Domain/SameSite used on login).
+func (app *Application) clearAuthCookies(w http.ResponseWriter) {
+	sameSite := http.SameSiteStrictMode
+	if app.Config.JwtDomain == "" {
+		sameSite = http.SameSiteNoneMode
+	}
+	for _, name := range []string{models.JWT.ACCESS_COOKIE_NAME, models.JWT.REFRESH_COOKIE_NAME} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			Domain:   app.Config.JwtDomain,
+			MaxAge:   -1,
+			Expires:  time.Unix(0, 0),
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: sameSite,
+		})
+	}
 }
 
 // GET /
@@ -214,9 +234,20 @@ func (app *Application) login(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authTokenResponse{
-		AccessToken: accessTokenString,
-		ExpiresAt:   accessExpiry.UTC().Format(time.RFC3339),
+		ExpiresAt: accessExpiry.UTC().Format(time.RFC3339),
 	})
+}
+
+// POST /v1/auth/logout — clears HttpOnly JWT cookies.
+func (app *Application) logout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		app.requirePostMethod(w, r, ErrPOST)
+		return
+	}
+	app.clearAuthCookies(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
 func (app *Application) userFromRefreshTokenString(tokenString string) (*models.JWTClaims, models.User, error) {
@@ -320,8 +351,7 @@ func (app *Application) refresh(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(authTokenResponse{
-		AccessToken: accessTokenString,
-		ExpiresAt:   accessExpiry.UTC().Format(time.RFC3339),
+		ExpiresAt: accessExpiry.UTC().Format(time.RFC3339),
 	})
 }
 
