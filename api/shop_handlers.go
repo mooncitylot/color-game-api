@@ -576,7 +576,7 @@ func (app *Application) useItem(w http.ResponseWriter, r *http.Request) {
 
 			response.EffectMetadata["extra_attempts_applied"] = extraAttempts
 			response.EffectMetadata["total_extra_attempts"] = modifier.ExtraAttempts
-			response.EffectMetadata["max_attempts"] = 5 + modifier.ExtraAttempts
+			response.EffectMetadata["max_attempts"] = 3 + modifier.ExtraAttempts
 		}
 	}
 

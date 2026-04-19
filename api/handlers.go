@@ -642,7 +642,7 @@ func (app *Application) submitScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	maxAttempts := 5 + extraAttempts
+	maxAttempts := 3 + extraAttempts
 	if maxAttempts > 10 {
 		maxAttempts = 10
 	}
@@ -905,7 +905,7 @@ func (app *Application) getUserScoreHistory(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	maxAttempts := 5 + extraAttempts
+	maxAttempts := 3 + extraAttempts
 	if maxAttempts > 10 {
 		maxAttempts = 10
 	}
