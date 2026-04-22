@@ -12,6 +12,7 @@ type PushNotificationDatabase interface {
 	CreateSubscription(sub models.PushSubscription) error
 	GetSubscriptionByEndpoint(endpoint string) (*models.PushSubscription, error)
 	GetUserSubscriptions(userID string) ([]models.PushSubscription, error)
+	GetAllSubscriptions() ([]models.PushSubscription, error)
 	DeleteSubscription(endpoint string) error
 	DeleteExpiredSubscriptions() (int64, error)
 }
@@ -88,6 +89,44 @@ func (p *pushNotificationDatabase) GetUserSubscriptions(userID string) ([]models
 	rows, err := p.db.Query(query, userID, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get user subscriptions: %v", err)
+	}
+	defer rows.Close()
+
+	var subscriptions []models.PushSubscription
+	for rows.Next() {
+		var sub models.PushSubscription
+		err := rows.Scan(
+			&sub.ID,
+			&sub.UserID,
+			&sub.Endpoint,
+			&sub.P256dh,
+			&sub.Auth,
+			&sub.Expiration,
+			&sub.CreatedAt,
+			&sub.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan push subscription: %v", err)
+		}
+		subscriptions = append(subscriptions, sub)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating push subscriptions: %v", err)
+	}
+
+	return subscriptions, nil
+}
+
+func (p *pushNotificationDatabase) GetAllSubscriptions() ([]models.PushSubscription, error) {
+	query := `
+		SELECT id, user_id, endpoint, p256dh, auth, expiration, created_at, updated_at
+		FROM push_subscriptions
+		WHERE expiration IS NULL OR expiration > $1
+	`
+	rows, err := p.db.Query(query, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get subscriptions: %v", err)
 	}
 	defer rows.Close()
 

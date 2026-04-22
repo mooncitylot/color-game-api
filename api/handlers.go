@@ -1240,10 +1240,7 @@ func (app *Application) sendPushNotification(w http.ResponseWriter, r *http.Requ
 	if req.UserID != "" {
 		subscriptions, err = app.PushRepo.GetUserSubscriptions(req.UserID)
 	} else {
-		// For now, we don't have a method to get all subscriptions
-		// This would need to be added to the repository
-		app.badRequest(w, r, errors.New("userId is required for now"))
-		return
+		subscriptions, err = app.PushRepo.GetAllSubscriptions()
 	}
 
 	if err != nil {
