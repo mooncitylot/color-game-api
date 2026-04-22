@@ -15,6 +15,9 @@ type Config struct {
 	JwtAccessDuration  int // seconds
 	JwtRefreshDuration int // seconds
 	JwtDomain          string
+	VapidPublicKey     string
+	VapidPrivateKey    string
+	VapidSubject       string
 	AllowedOrigins     []string
 	DevMode            bool
 }

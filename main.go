@@ -31,6 +31,9 @@ func main() {
 		JwtAccessDuration:  getEnvInt("JWT_ACCESS_DURATION", 900),     // 15 minutes
 		JwtRefreshDuration: getEnvInt("JWT_REFRESH_DURATION", 604800), // 7 days
 		JwtDomain:          getEnv("JWT_DOMAIN", ""),
+		VapidPublicKey:     getEnv("VAPID_PUBLIC_KEY", ""),
+		VapidPrivateKey:    getEnv("VAPID_PRIVATE_KEY", ""),
+		VapidSubject:       getEnv("VAPID_SUBJECT", ""),
 		AllowedOrigins:     getEnvSlice("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173"),
 		DevMode:            getEnvBool("DEV_MODE", true),
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SherClockHolmes/webpush-go"
 	"github.com/color-game/api/datastore"
 	"github.com/color-game/api/models"
 	"github.com/golang-jwt/jwt/v5"
@@ -1234,6 +1235,11 @@ func (app *Application) sendPushNotification(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if app.Config.VapidPublicKey == "" || app.Config.VapidPrivateKey == "" || app.Config.VapidSubject == "" {
+		app.internalServerError(w, r, errors.New("push notifications are not configured on the server"))
+		return
+	}
+
 	// Get subscriptions
 	var subscriptions []models.PushSubscription
 	var err error
@@ -1267,19 +1273,71 @@ func (app *Application) sendPushNotification(w http.ResponseWriter, r *http.Requ
 		Data:  req.Data,
 	}
 
-	// TODO: Implement actual push sending logic here
-	// Example:
-	// for _, sub := range subscriptions {
-	//     _, err := webpush.SendNotification(notification, sub, vapidPrivateKey)
-	//     if err != nil {
-	//         log.Printf("Failed to send push to %s: %v", sub.Endpoint, err)
-	//     }
-	// }
+	payload, err := json.Marshal(notification)
+	if err != nil {
+		app.internalServerError(w, r, err)
+		return
+	}
+
+	options := &webpush.Options{
+		Subscriber:      app.Config.VapidSubject,
+		TTL:             60,
+		Urgency:         webpush.UrgencyHigh,
+		VAPIDPublicKey:  app.Config.VapidPublicKey,
+		VAPIDPrivateKey: app.Config.VapidPrivateKey,
+	}
+
+	sent := 0
+	failed := 0
+	removedStale := 0
+
+	for _, sub := range subscriptions {
+		pushSub := &webpush.Subscription{
+			Endpoint: sub.Endpoint,
+			Keys: webpush.Keys{
+				Auth:   sub.Auth,
+				P256dh: sub.P256dh,
+			},
+		}
+
+		resp, pushErr := webpush.SendNotification(payload, pushSub, options)
+		if pushErr != nil {
+			failed++
+			log.Printf("Failed to send push to endpoint %s: %v", sub.Endpoint, pushErr)
+			continue
+		}
+
+		if resp == nil {
+			failed++
+			continue
+		}
+
+		resp.Body.Close()
+
+		if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+			sent++
+			continue
+		}
+
+		failed++
+		log.Printf("Push provider returned status %d for endpoint %s", resp.StatusCode, sub.Endpoint)
+
+		if resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound {
+			if delErr := app.PushRepo.DeleteSubscription(sub.Endpoint); delErr != nil {
+				log.Printf("Failed to delete stale subscription for endpoint %s: %v", sub.Endpoint, delErr)
+			} else {
+				removedStale++
+			}
+		}
+	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":     "Push notification queued",
-		"sent":        len(subscriptions),
+		"message":      "Push notification processed",
+		"sent":         sent,
+		"failed":       failed,
+		"removedStale": removedStale,
+		"total":        len(subscriptions),
 		"notification": notification,
 	})
 }
